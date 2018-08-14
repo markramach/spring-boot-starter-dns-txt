@@ -170,7 +170,7 @@ With this testing scenario, you will need to define the DNS endpoint for the DNS
 	  endpoint: 127.0.0.1
 	  port: 5003
 
-Finally, we can define a very simple Spring Boot application to test property injection. If we create the following class with an `@Value` annotation to inject our TXT record value.
+Finally, we can define a very simple Spring Boot application to test property injection. If we create the following class with n `@Value` annotation, we can inject our TXT record value into our bean.
 
 ```
 import javax.annotation.PostConstruct;
