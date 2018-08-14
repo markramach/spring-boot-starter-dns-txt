@@ -1,18 +1,18 @@
 ## spring-boot-starter-dns-txt
 
-Running highly available micro-services requires a multi-location approach. That can consist of multiple public cloud regions, private clouds, or private data centers. Whatever the locations are, we need a consistent, reliable way for our services to discover where they are located and configure themselves accordingly.
+Running highly available micro-services requires a multi-location approach. Many modern applications and services consist of deployments in multiple public cloud regions, private clouds, as well as private data centers. Whatever the locations are, we need a consistent, reliable way for our services to discover where they are located and configure themselves accordingly.
 
-As part of an initiative to build globally connected Kubernetes clusters at CenturyLink, we have a need to distribute our container workloads across multiple locations. Initially we used location labels on our nodes to target deployments using node selectors. However, this means you have to create a deployment per service per location. This strategy not only creates more maintenance work, it also lacks the ability to redistribute our workloads in the event of a total failure at a location.
+As part of an initiative to build globally connected Kubernetes clusters at CenturyLink, we have a need to distribute our container workloads across multiple locations. Initially we used location labels on our nodes to target deployments using node selectors. However, this means a deployment per service per location is required. This strategy not only creates more maintenance work, it also lacks the ability to redistribute our workloads in the event of a total failure at a location.
 
-If we could to totally ignore the location and use anti-affinity policies to schedule our workloads, we could use a single deployment for our service. The problem is our services need to have some detail about where they are located. The services need to know what location specific services they should interact with. 
+If we could totally ignore the location and use anti-affinity policies to schedule our workloads, we could use a single deployment for our service. The problem is our services need to have some detail about where they are located. The services need to know what location specific services they should interact with. 
 
-In researching the problem, I found strategies of using sidecar containers injected with the Kubernetes node identifier to perform a lookup against the Kubernetes api for discovery. This seemed more complex than it needed to be, and the thought of managing security for all the namespaces was going to require additional management or automation.
+In researching the problem, I found strategies of using sidecar containers injected with the Kubernetes node identifier to perform a lookup against the Kubernetes api for discovery. This seemed more complex than it needed to be, and the thought of managing security for all the namespaces was going to require additional manual management or automation.
 
 We could leverage tools like etcd and consul for this environment level discovery. However, this would require a large number of additional processes running across our cluster. And in the case of a multi-tenant cluster, each team or namespace may need these processes configured. We could also use a multi-tenant etcd or consul instance, but yet again, this would require some sort of management and automation of the tools.
 
 Another possible solution was the use of our cluster DNS services. When constructing our clusters, we created custom DNS controllers and deployments at each individual location, configuring the kubelet on each node to resolve using the location specific DNS pods. With this functionality already available to us already, we simply needed a way for teams to define DNS records at these specific locations.
 
-We ended up making a very simple change to our existing DNS controller to allow cluster users to defined Custom Resource Definitions (CRD) to define DNS TXT records. The CRD allows the user to specify a location, and 1 or more key/values that should be made available via DNS query. For example:   
+We ended up making a very simple change to our existing DNS controller to allow cluster users to define Custom Resource Definitions (CRD) containing DNS TXT record configurations. The CRD allows the user to specify a location, and 1 or more key/values that should be made available via DNS query. For example:   
 
 ```
 apiVersion: cd.ctl.io/v1
@@ -160,7 +160,7 @@ env.default.skydns.local. 3600	IN	TXT	"localhost"
 ;; MSG SIZE  rcvd: 64
 ```
 
-Finally, with this testing scenario, you will need to define the DNS endpoint for the DNS TXT property resolver. In this case, you will need set the optional `endpoint` and `port` settings in the bootstrap.yml.
+With this testing scenario, you will need to define the DNS endpoint for the DNS TXT property resolver. In this case, you will need set the optional `endpoint` and `port` settings in the bootstrap.yml.
 
 	dns:
 	  suffix: default.cluster.local
@@ -170,3 +170,69 @@ Finally, with this testing scenario, you will need to define the DNS endpoint fo
 	  endpoint: 127.0.0.1
 	  port: 5003
 
+Finally, we can define a very simple Spring Boot application to test property injection. If we create the following class with an `@Value` annotation to inject our TXT record value.
+
+```
+import javax.annotation.PostConstruct;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+/**
+ * @author mramach
+ *
+ */
+@SpringBootApplication
+public class Application {
+
+	@Value("${env}")
+	private String env;
+	
+	@PostConstruct
+	public void afterPropertiesSet() {
+		System.out.println(String.format("Found environment value: %s", env));
+	}
+	
+	/**
+	 * @param args
+	 */
+	public static void main(String[] args) {
+		SpringApplication.run(Application.class, args);
+	}
+
+}
+```
+
+If we have been successful, executing the application will result in the following output.
+
+```
+2018-08-14 09:44:49.440  INFO 2209 --- [           main] s.c.a.AnnotationConfigApplicationContext : Refreshing org.springframework.context.annotation.AnnotationConfigApplicationContext@1d2adfbe: startup date [Tue Aug 14 09:44:49 CDT 2018]; root of context hierarchy
+2018-08-14 09:44:49.658  INFO 2209 --- [           main] trationDelegate$BeanPostProcessorChecker : Bean 'configurationPropertiesRebinderAutoConfiguration' of type [org.springframework.cloud.autoconfigure.ConfigurationPropertiesRebinderAutoConfiguration$$EnhancerBySpringCGLIB$$e167a20b] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+ :: Spring Boot ::        (v2.0.4.RELEASE)
+
+2018-08-14 09:44:49.853  INFO 2209 --- [           main] b.c.PropertySourceBootstrapConfiguration : Located property source: DnsTxtPropertySource {name='dns-txt-property-source-8d401360-1383-4c0c-ba65-887ec6b319b0'}
+2018-08-14 09:44:49.856  INFO 2209 --- [           main] com.flyover.boot.dns.config.Application  : No active profile set, falling back to default profiles: default
+2018-08-14 09:44:49.866  INFO 2209 --- [           main] s.c.a.AnnotationConfigApplicationContext : Refreshing org.springframework.context.annotation.AnnotationConfigApplicationContext@6fa34d52: startup date [Tue Aug 14 09:44:49 CDT 2018]; parent: org.springframework.context.annotation.AnnotationConfigApplicationContext@1d2adfbe
+2018-08-14 09:44:50.051  INFO 2209 --- [           main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=cd5c4a9a-4744-3826-96ee-30462e9b02d8
+2018-08-14 09:44:50.067  INFO 2209 --- [           main] trationDelegate$BeanPostProcessorChecker : Bean 'org.springframework.cloud.autoconfigure.ConfigurationPropertiesRebinderAutoConfiguration' of type [org.springframework.cloud.autoconfigure.ConfigurationPropertiesRebinderAutoConfiguration$$EnhancerBySpringCGLIB$$e167a20b] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+Found environment value: localhost
+2018-08-14 09:44:50.277  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Registering beans for JMX exposure on startup
+2018-08-14 09:44:50.283  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'configurationPropertiesRebinder' has been autodetected for JMX exposure
+2018-08-14 09:44:50.284  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'environmentManager' has been autodetected for JMX exposure
+2018-08-14 09:44:50.284  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'refreshScope' has been autodetected for JMX exposure
+2018-08-14 09:44:50.286  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Located managed bean 'environmentManager': registering with JMX server as MBean [org.springframework.cloud.context.environment:name=environmentManager,type=EnvironmentManager]
+2018-08-14 09:44:50.294  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Located managed bean 'refreshScope': registering with JMX server as MBean [org.springframework.cloud.context.scope.refresh:name=refreshScope,type=RefreshScope]
+2018-08-14 09:44:50.302  INFO 2209 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Located managed bean 'configurationPropertiesRebinder': registering with JMX server as MBean [org.springframework.cloud.context.properties:name=configurationPropertiesRebinder,context=6fa34d52,type=ConfigurationPropertiesRebinder]
+2018-08-14 09:44:50.316  INFO 2209 --- [           main] com.flyover.boot.dns.config.Application  : Started Application in 1.549 seconds (JVM running for 1.859)
+2018-08-14 09:44:50.318  INFO 2209 --- [       Thread-6] s.c.a.AnnotationConfigApplicationContext : Closing org.springframework.context.annotation.AnnotationConfigApplicationContext@6fa34d52: startup date [Tue Aug 14 09:44:49 CDT 2018]; parent: org.springframework.context.annotation.AnnotationConfigApplicationContext@1d2adfbe
+2018-08-14 09:44:50.320  INFO 2209 --- [       Thread-6] o.s.j.e.a.AnnotationMBeanExporter        : Unregistering JMX-exposed beans on shutdown
+2018-08-14 09:44:50.321  INFO 2209 --- [       Thread-6] o.s.j.e.a.AnnotationMBeanExporter        : Unregistering JMX-exposed beans
+```
